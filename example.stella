@@ -1,0 +1,122 @@
+// This is a test program whose purpose is to (manually) check that the parser produces the
+//  expected AST structure. It's not really a useful program, just one that uses as many
+//  language features as possible.
+language core;
+
+extend with #records, #tuples, #pairs, #unit-type;
+extend with #nested-function-declarations, #numeric-literals, #arithmetic-operators;
+extend with #let-bindings, #natural-literals, #nullary-functions, #multiparameter-functions;
+extend with #type-aliases, #sum-types, #variants, #lists, #recursive-types;
+
+fn Nat::add(n : Nat) -> (fn(Nat) -> Nat) {
+  return fn(m : Nat) {
+    return Nat::rec(n, m, fn(i : Nat) {
+      return fn(r : Nat) { return succ(r) } })
+  }
+}
+
+// Function types basic example
+fn Nat2Nat::const(f : fn(Nat) -> Nat) -> (fn(Nat) -> (fn(Nat) -> Nat)) {
+  return fn(x : Nat) { return f }
+}
+
+// If-else example
+fn Bool::or(a : Bool) -> (fn(Bool) -> Bool) {
+  return fn(b : Bool) {
+    return if a then true else b
+  }
+}
+
+fn square(n : Nat) -> Nat throws Bool {
+  return Nat::rec(n, 0, fn(i : Nat) {
+      return fn(r : Nat) {
+        // r := r + (2*i + 1)
+        // Let-binding example
+        return let add_i = Nat::add(i) in add_i(add_i(succ(r)));
+      };
+  });
+}
+
+// Nested function example
+fn plus4(n : Nat) -> Nat {
+  fn plus2(n : Nat) -> Nat {
+    // Numeric literals & Arithmetic operations example
+    return n + 2
+  }
+  return plus2(plus2(n))
+}
+
+
+// multiparameter and nullary function
+inline fn one() -> Nat { return succ(0) }
+fn multi(x : Nat, y : Nat) -> Nat {
+  return x * y * one();
+}
+
+// Type aliases
+type NonNegative = Nat
+type MapEntry = { key : Nat, value : Nat }
+type LinkedList = { value : NonNegative, next : LinkedList }
+
+// Pairs
+fn manhattan(point : { Nat, Nat}) -> Nat {
+  return point.1 + point.2
+}
+
+// Variants and unit
+fn attempt(get_one? : Bool) -> <| value : Nat, failure : Unit |> {
+  return
+    if get_one?
+      then <| value = 0 |>
+      else <| failure = unit |>
+}
+
+// References
+fn another_one(n : Nat) -> Nat {
+  return
+    let x = new(0) in
+    x := *x + 1;
+    x := *x * *x;
+    *x
+}
+fn inc_ref(ref : &Nat) -> Unit {
+  return
+    ref := succ(*ref)
+}
+
+// Exceptions
+exception type = Nat
+// exception variant test = Nat
+
+fn fail(param : Nat) -> Nat throws Nat {
+  return throw(succ(0))
+}
+fn attempt_catch(param : Nat) -> Nat {
+  return try {
+    fail(param)
+  } catch {
+    succ(0) => 0
+  }
+}
+fn attempt_with(param : Nat) -> Nat {
+  return try { fail(param) } with { 0 }; panic!
+}
+
+// Subtyping
+// TODO
+
+// Generics
+generic fn identity[X](x : X) -> X {
+  return x
+}
+
+generic fn const[X](x : X) -> forall Y. fn(Y) -> X {
+  return generic [Y] fn(y : Y) {
+    return identity[X](x)
+  }
+}
+
+// Sum type
+fn main(n : Nat) -> Nat + Bool {
+  return inr(n); inl(n);
+}
