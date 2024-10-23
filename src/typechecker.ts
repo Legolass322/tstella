@@ -1,28 +1,18 @@
 import { makeSimpleType, type Decl, type DeclFun, type Expr, type Identifier, type ParamDecl, type Program, type Type, makeFunType, TypeNat, TypeBool, ExtensionKeys } from './ast'
 import { Context } from './context'
 import { Errors } from './errors'
-import { protector } from './utils'
+import { protector, thrower } from './utils'
 
 export function typecheckProgram(ast: Program) {
   const ctx = new Context()
 
   ctx.propagateExtensions(ast.extensions)
 
+  // Global scope
+  ctx.pushDeclarationLayer([])
+
   for (const decl of ast.declarations) {
-    const declType = decl.type
-    switch (declType) {
-      case 'DeclFun':
-        typecheckFunctionDecl(decl, ctx)
-        break
-      case 'DeclFunGeneric':
-      case 'DeclExceptionType':
-      case 'DeclExceptionVariant':
-      case 'DeclTypeAlias':
-        console.error('unimplemeted typecheckProgram')
-        break
-      default:
-        protector(declType, 'Unknown declaration type')
-    }
+    typecheckDecl(decl, ctx)
   }
 
   if (!ctx.hasMain) {
@@ -30,16 +20,25 @@ export function typecheckProgram(ast: Program) {
   }
 }
 
+function typecheckDecl(decl: Decl, ctx: Context) {
+  const declType = decl.type
+  switch (declType) {
+    case 'DeclFun':
+      typecheckFunctionDecl(decl, ctx)
+      break
+    case 'DeclFunGeneric':
+    case 'DeclExceptionType':
+    case 'DeclExceptionVariant':
+    case 'DeclTypeAlias':
+      console.error('unimplemeted typecheckProgram')
+      break
+    default:
+      protector(declType, 'Unknown declaration type')
+  }
+}
 
 function typecheckFunctionDecl(decl: DeclFun, ctx: Context) {
   console.log(`Checking the function "${decl.name}"...`);
-
-  /**
-   * todo:
-   * #nested-function-declarations
-   * #nullary-functions
-   * #multiparameter-functions
-  */
 
   if (decl.name === 'main') {
     if (ctx.hasMain) {
@@ -48,56 +47,141 @@ function typecheckFunctionDecl(decl: DeclFun, ctx: Context) {
     ctx.hasMain = true
   }
 
-  ctx.pushDeclarationLayer([decl])
-
-  // todo: check for nestedDeclarations
-  // decl.nestedDeclarations
+  ctx.addDeclarationToLayer(decl)
 
   ctx.pushDeclarationLayer(decl.parameters)
+
+  thrower([
+    [!ctx.isExtended(ExtensionKeys.multiparam) && decl.parameters.length > 1, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+    [!ctx.isExtended(ExtensionKeys.nullary) && !decl.parameters.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+  ])
+
+  if (ctx.isExtended(ExtensionKeys.nested)) {
+    decl.nestedDeclarations.forEach(decl => {
+      typecheckDecl(decl, ctx)
+    })
+  }
+
   const returnType = typecheckExpr(decl.returnValue, ctx)
   if (decl.returnType === undefined || returnType === undefined) {
-    
+    // todo
+    throw new Error
   }
-  verifyTypesMatch(decl.returnType, returnType, ctx)
-  ctx.declarationStack.pop()
+  if (decl.returnType !== undefined || decl.returnType !== undefined) {
+    verifyTypesMatch(decl.returnType, returnType, ctx)
+  }
 
-  ctx.declarationStack.pop()
+  ctx.popDeclarationLayer()
 }
 
-/**
- * Checks that expr node contains well-typed nodes 
- * and result is mathing with resultType
- * @param expr 
- * @param resultType
- * @param ctx
- */
 function typecheckExpr(expr: Expr, ctx: Context): Type {
-  const isInferring = resultType?.type === 'Inferred'
-
   const type = expr.type
   switch (type) {
-    case 'NatPred': // todo: strange naming
+    case 'NatPred':
     case 'Succ':
-      const typeMismatchError = () => {
-        throw new Error('todo')
+      const expectedPredSucc = makeSimpleType('TypeNat')
+      const inner = typecheckExpr(expr.expr, ctx)
+      verifyTypesMatch(expectedPredSucc, inner, ctx)
+      return expectedPredSucc
+    case 'ConstBool':
+      return makeSimpleType('TypeBool')
+    case 'ConstInt':
+      if (expr.value < 0) {
+        throw new Error(Errors.ILLEGAL_NEGATIVE_LITERAL)
       }
-      setOnInferring(resultType, makeSimpleType('TypeNat'), typeMismatchError)
-      if (!isNat(resultType)) {
-        typeMismatchError()
+      if (expr.value > 1 && !ctx.isExtended(ExtensionKeys.natural)) {
+        throw new Error('todo ConstInt natural')
       }
-      typecheckExpr(expr.expr, makeSimpleType('TypeNat'), ctx)
-      break
+      return makeSimpleType('TypeNat')
+    case 'NatIsZero':
+      const expectedIsZero = makeSimpleType('TypeNat')
+      const innerIsZero = typecheckExpr(expr.expr, ctx)
+      verifyTypesMatch(expectedIsZero, innerIsZero, ctx)
+      return makeSimpleType('TypeBool')
+    case 'NatRec':
+      const from = expr.n
+      const initial = expr.initial
+      const step = expr.step
+
+      verifyTypesMatch(makeSimpleType('TypeNat'), typecheckExpr(from, ctx), ctx)
+      
+      const initialType = typecheckExpr(initial, ctx)
+      const stepType = typecheckExpr(step, ctx)
+
+      verifyTypesMatch(
+        {
+          type: 'TypeFun',
+          parametersTypes: [makeSimpleType('TypeNat')],
+          returnType: {
+            type: 'TypeFun',
+            parametersTypes: [initialType],
+            returnType: initialType
+          }
+        },
+        stepType,
+        ctx,
+      )
+
+      return initialType
     case 'If':
-      typecheckExpr(expr.condition, makeSimpleType('TypeBool'), ctx)
-      typecheckExpr(expr.thenExpr, resultType, ctx)
-      typecheckExpr(expr.elseExpr, resultType, ctx)
-      break
+      const conditionType = makeSimpleType('TypeBool')
+      const actualConditionType = typecheckExpr(expr.condition, ctx)
+      verifyTypesMatch(conditionType, actualConditionType, ctx)
+      const thenType = typecheckExpr(expr.thenExpr, ctx)
+      const elseType = typecheckExpr(expr.elseExpr, ctx)
+      verifyTypesMatch(thenType, elseType, ctx)
+      return thenType
     case 'Application':
-      // todo: nullary and multi arg functions
-      const inferringArgs = expr.arguments.map(arg => makeInferType(arg))
-      // typecheckExpr(expr.function, makeFunType([], resultType), ctx)
-      break
+      const { function: func, arguments: args } = expr
+      const funcType = typecheckExpr(func, ctx)
+
+      if (funcType.type !== 'TypeFun') {
+        throw new Error(Errors.NOT_A_FUNCTION)
+      }
+      thrower([
+        [args.length > funcType.parametersTypes.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+        [!ctx.isExtended(ExtensionKeys.multiparam) && args.length > 1, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+        [!ctx.isExtended(ExtensionKeys.nullary) && !args.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+      ])
+      for (let i = 0; i < args.length; i++) {
+        const argType = typecheckExpr(args[i], ctx)
+        const expectedArgType = funcType.parametersTypes[i]
+        verifyTypesMatch(expectedArgType, argType, ctx)
+      }
+      // todo
+      return funcType.returnType!
+    case 'Abstraction':
+      const { parameters, returnValue } = expr
+
+      thrower([
+        [!ctx.isExtended(ExtensionKeys.multiparam) && parameters.length > 1, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+        [!ctx.isExtended(ExtensionKeys.nullary) && !parameters.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+      ])
+
+      ctx.pushDeclarationLayer(parameters)
+      const returnType = typecheckExpr(returnValue, ctx)
+      ctx.popDeclarationLayer()
+
+      return {
+        type: 'TypeFun',
+        parametersTypes: parameters.map(param => param.paramType),
+        returnType: returnType
+      }
+    case 'Var':
+      const declarationOfVar = ctx.findDeclaration(expr.name)
+      // todo
+      return declarationOfVar.declType
+    case 'Sequence':
+      const { expr1, expr2 } = expr
+      const expr1Type = typecheckExpr(expr1, ctx)
+      if (expr2) {
+        const expr2Type = typecheckExpr(expr2, ctx)
+        return expr2Type
+      }
+      return expr1Type
     default:
+      console.log(expr)
+      throw new Error(`unexpected: ${type}`)
     // protector(type, 'Unknown expression type')
   }
 }

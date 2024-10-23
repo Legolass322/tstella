@@ -1,4 +1,4 @@
-import { Context } from '../types'
+import { Context } from '../context'
 
 type BaseTransformer<Base, T> = (base: Base) => T
 

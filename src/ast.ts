@@ -13,22 +13,41 @@ export enum ExtensionKeys {
   natural = 'natural',
   multiparam = 'multiparam',
   nullary = 'nullary',
+  nested = 'nested',
+  unit = 'unit',
+  pairs = 'pairs',
+  records = 'records',
+  let = 'let',
 }
 
 export const ExtensionMap: Record<string, ExtensionKeys> = {
   'natural-literals': ExtensionKeys.natural,
   'multiparameter-functions': ExtensionKeys.multiparam,
   'nullary-functions': ExtensionKeys.nullary,
+  'nested-function-declarations': ExtensionKeys.nested,
+  'unit-type': ExtensionKeys.unit,
+  'records': ExtensionKeys.records,
+  'let-bindings': ExtensionKeys.let,
 }
 
 export type NaturalLiteralsExtension = { [ExtensionKeys.natural]: true }
 export type MultiparamFunctionExtension = { [ExtensionKeys.multiparam]: true }
 export type NullaryFunctionExtension = { [ExtensionKeys.nullary]: true }
+export type NestedFunctionExtension = { [ExtensionKeys.nested]: true }
+export type UnitTypeExtension = { [ExtensionKeys.unit]: true }
+export type PairsExtension = { [ExtensionKeys.pairs]: true }
+export type RecordsExtension = { [ExtensionKeys.records]: true }
+export type LetExtension = { [ExtensionKeys.let]: true }
 
 export type AllExtensions = 
   & NaturalLiteralsExtension
   & MultiparamFunctionExtension
   & NullaryFunctionExtension
+  & NestedFunctionExtension
+  & UnitTypeExtension
+  & PairsExtension
+  & RecordsExtension
+  & LetExtension
 
 export type Extensions = Partial<AllExtensions>
 
@@ -56,13 +75,16 @@ const simpleTypes = ['TypeNat', 'TypeBool', 'TypeUnit', 'TypeTop', 'TypeBottom']
 type SimpleTypes = typeof simpleTypes[number]
 
 type SimpleType<T extends SimpleTypes> = {
-  type: T;
-};
-export type TypeNat = SimpleType<'TypeNat'>;
-export type TypeBool = SimpleType<'TypeBool'>;
-export type TypeUnit = SimpleType<'TypeUnit'>;
-export type TypeTop = SimpleType<'TypeTop'>;
-export type TypeBottom = SimpleType<'TypeBottom'>;
+  type: T
+}
+export type TypeNat = SimpleType<'TypeNat'>
+export type TypeBool = SimpleType<'TypeBool'>
+export type TypeUnit = SimpleType<'TypeUnit'>
+export type TypeTop = SimpleType<'TypeTop'>
+export type TypeBottom = SimpleType<'TypeBottom'>
+
+/** Util type for return values */
+// export type TypeUndefined = SimpleType<'TypeUndefined'>
 
 export function makeSimpleType(type: SimpleTypes) {
   return {type}

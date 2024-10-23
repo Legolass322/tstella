@@ -6,7 +6,7 @@ const ContextSymbol = Symbol('ContextSymbol')
 
 type ContextDecl = {
   name: Identifier
-  declType?: Type
+  declType: Type
   origin: GeneralDecl
   [ContextSymbol]: 'ContextDecl'
 }
@@ -106,6 +106,11 @@ function declToCtxDecl(decl: CtxDeclParsable): ContextDecl {
     case "DeclFun":
       return {
         name: decl.name,
+        declType: {
+          type: 'TypeFun',
+          parametersTypes: decl.parameters.map(param => param.paramType),
+          returnType: decl.returnType
+        },
         origin: decl,
         [ContextSymbol]: 'ContextDecl'
       }

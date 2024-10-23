@@ -15,8 +15,17 @@ if (process.argv.length === 2) {
       'fn add_two(n : Nat) -> Nat {\n' +
       '  return succ(succ(n));\n' +
       '}\n\n' +
+      `fn my_add(n : Nat) -> (fn(Nat) -> Nat) {
+        return fn(m : Nat) {
+          return Nat::rec(n, m, fn(i : Nat) {
+            return fn (r : Nat) {
+              return succ(r)
+            }
+          })
+        }
+      }\n` +
       'fn main(n : Nat) -> Nat {\n' +
-      '  return add_two(n);\n' +
+      '  return my_add(n)(0);\n' +
       '}\n'
   );
 } else if (process.argv.length === 3) {
