@@ -11,7 +11,8 @@ if (process.argv.length === 2) {
   inputStream = new CharStream(
     'language core;\n' +
       'extend with #numeric-literals, #records;\n' +
-      'extend with #tuples;\n' +
+      'extend with #tuples, #nullary-functions;\n' +
+      'extend with #let-bindings, #unit-type;\n' +
       'fn add_two(n : Nat) -> Nat {\n' +
       '  return succ(succ(n));\n' +
       '}\n\n' +
@@ -24,8 +25,24 @@ if (process.argv.length === 2) {
           })
         }
       }\n` +
+      `fn iterate(n : Nat) -> { current : Nat, next : Nat} {
+        return { current = n, next = succ(n) }
+      }\n` +
+      `fn noop(_ : {}) -> {} {
+        return {}
+      }
+      fn third(tup : {Nat, Nat, Nat}) -> Nat {
+        return tup.2
+      }
+      fn test_let() -> Nat {
+        return let one = succ(0), u = unit in
+              let two = succ(one) in
+              let three = succ(two) in
+              my_add(one)(my_add(two)(three))
+      }
+      ` +
       'fn main(n : Nat) -> Nat {\n' +
-      '  return my_add(n)(0);\n' +
+      '  return my_add(n)(iterate( third({n, succ(n), succ(succ(n))}) ).next);\n' +
       '}\n'
   );
 } else if (process.argv.length === 3) {

@@ -1,5 +1,5 @@
-import { makeSimpleType, type Decl, type DeclFun, type Expr, type Identifier, type ParamDecl, type Program, type Type, makeFunType, TypeNat, TypeBool, ExtensionKeys } from './ast'
-import { Context } from './context'
+import { makeSimpleType, type Decl, type DeclFun, type Expr, type Identifier, type ParamDecl, type Program, type Type, makeFunType, TypeNat, TypeBool, ExtensionKeys, RecordFieldType, Pattern } from './ast'
+import { Context, ContextSymbol } from './context'
 import { Errors } from './errors'
 import { protector, thrower } from './utils'
 
@@ -179,6 +179,74 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
         return expr2Type
       }
       return expr1Type
+    case 'Unit':
+      // todo
+      thrower([[!ctx.isExtended(ExtensionKeys.unit), 'no #unit - unsupported']])
+      return makeSimpleType('TypeUnit')
+    case 'Tuple':
+      thrower([
+        [expr.exprs.length === 2 && !ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs), 'no #pairs - unsupported'],
+        [!ctx.isExtended(ExtensionKeys.tuples), 'no #tuple - unsupported'],
+      ])
+      const tupleExprTypes = expr.exprs.map(e => typecheckExpr(e, ctx))
+      return {
+        type: 'TypeTuple',
+        types: tupleExprTypes,
+      }
+    case 'DotTuple':
+      thrower([[!ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs), 'no #tuple - unsupported']])
+      const tupleType = typecheckExpr(expr.expr, ctx)
+      if (tupleType.type !== 'TypeTuple') {
+        // todo
+        throw new Error()
+      }
+      thrower([
+        [tupleType.types.length !== 2 && !ctx.isExtended(ExtensionKeys.tuples), 'no #tuple - unsupported'],
+        [tupleType.types.length <= expr.index, 'tuple out of bound'],
+      ])
+      return tupleType.types[expr.index]
+    case 'SRecord':
+      thrower([[!ctx.isExtended(ExtensionKeys.records), 'no #records - unsupported']])
+      const fields: RecordFieldType[] = expr.bindings.map(binding => ({
+        type: 'RecordFieldType',
+        label: binding.name,
+        fieldType: typecheckExpr(binding.expr, ctx)
+      }))
+      return {
+        type: 'TypeRecord',
+        fieldTypes: fields,
+      }
+    case 'DotRecord':
+      thrower([[!ctx.isExtended(ExtensionKeys.records), 'no #records - unsupported']])
+      const recordType = typecheckExpr(expr.expr, ctx)
+      if (recordType.type !== 'TypeRecord') {
+        // todo
+        throw new Error()
+      }
+      const field = recordType.fieldTypes.find(r => r.label === expr.label)
+      if (!field) {
+        // todo
+        throw new Error()
+      }
+      return field.fieldType
+    case 'Let':
+      ctx.pushDeclarationLayer([])
+      const pbs = expr.patternBindings
+      for (const pb of pbs) {
+        if (pb.pattern.type === 'PatternVar') {
+          const name = pb.pattern.name
+          const type = typecheckExpr(pb.rhs, ctx)
+          ctx.addDeclarationToLayer({
+            name,
+            declType: type,
+            origin: pb,
+            [ContextSymbol]: 'ContextDecl'
+          })
+        }
+      }
+      const letType = typecheckExpr(expr.body, ctx)
+      ctx.popDeclarationLayer()
+      return letType
     default:
       console.log(expr)
       throw new Error(`unexpected: ${type}`)

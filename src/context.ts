@@ -1,13 +1,13 @@
-import { DeclFun, Extension, ExtensionKeys, ExtensionMap, Extensions, Identifier, ParamDecl, Type } from "./ast";
+import { DeclFun, Extension, ExtensionKeys, ExtensionMap, Extensions, Identifier, ParamDecl, PatternBinding, Type } from "./ast";
 import { Errors } from "./errors";
 import { GeneralDecl } from "./types";
 
-const ContextSymbol = Symbol('ContextSymbol')
+export const ContextSymbol = Symbol('ContextSymbol')
 
 type ContextDecl = {
   name: Identifier
   declType: Type
-  origin: GeneralDecl
+  origin: GeneralDecl | PatternBinding
   [ContextSymbol]: 'ContextDecl'
 }
 
@@ -43,13 +43,19 @@ export class Context {
 
   propagateExtensions(exts: Extension[]) {
     for (const ext of exts) {
-      const name = ExtensionMap[ext]
-      this.extensions[name] = true
+      const name = ExtensionMap[ext.slice(1)]
+      if (name) {
+        this.extensions[name] = true
+      }
     }
   }
 
   isExtended(...key: ExtensionKeys[]) {
     return key.every(k => this.extensions[k])
+  }
+
+  isExtendedSome(...key: ExtensionKeys[]) {
+    return key.some(k => this.extensions[k])
   }
 
   pushDeclarationLayer(arr: (ContextDecl | CtxDeclParsable)[]) {
@@ -90,7 +96,7 @@ export class Context {
         return decl
       }
     }
-    throw new Error(Errors.UNDEFINED_VARIABLE)
+    throw new Error(Errors.UNDEFINED_VARIABLE + ' ' + name)
   }
 }
 
@@ -103,7 +109,7 @@ function declToCtxDecl(decl: CtxDeclParsable): ContextDecl {
         origin: decl,
         [ContextSymbol]: 'ContextDecl'
       }
-    case "DeclFun":
+    case 'DeclFun':
       return {
         name: decl.name,
         declType: {

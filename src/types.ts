@@ -1,4 +1,4 @@
-import { Decl, Expr, Identifier, ParamDecl, Type } from './ast'
+import { Decl, Expr, Identifier, ParamDecl, PatternBinding, Type } from './ast'
 
 export type TypeWithUndefined = Type | undefined // todo
 

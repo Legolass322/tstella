@@ -16,16 +16,20 @@ export enum ExtensionKeys {
   nested = 'nested',
   unit = 'unit',
   pairs = 'pairs',
+  tuples = 'tuples',
   records = 'records',
   let = 'let',
 }
 
 export const ExtensionMap: Record<string, ExtensionKeys> = {
+  'numeric-literals': ExtensionKeys.natural,
   'natural-literals': ExtensionKeys.natural,
   'multiparameter-functions': ExtensionKeys.multiparam,
   'nullary-functions': ExtensionKeys.nullary,
   'nested-function-declarations': ExtensionKeys.nested,
   'unit-type': ExtensionKeys.unit,
+  'pairs': ExtensionKeys.pairs,
+  'tuples': ExtensionKeys.tuples,
   'records': ExtensionKeys.records,
   'let-bindings': ExtensionKeys.let,
 }
@@ -36,6 +40,7 @@ export type NullaryFunctionExtension = { [ExtensionKeys.nullary]: true }
 export type NestedFunctionExtension = { [ExtensionKeys.nested]: true }
 export type UnitTypeExtension = { [ExtensionKeys.unit]: true }
 export type PairsExtension = { [ExtensionKeys.pairs]: true }
+export type TuplesExtension = { [ExtensionKeys.tuples]: true }
 export type RecordsExtension = { [ExtensionKeys.records]: true }
 export type LetExtension = { [ExtensionKeys.let]: true }
 
@@ -46,6 +51,7 @@ export type AllExtensions =
   & NestedFunctionExtension
   & UnitTypeExtension
   & PairsExtension
+  & TuplesExtension
   & RecordsExtension
   & LetExtension
 
