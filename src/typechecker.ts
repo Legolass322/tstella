@@ -1,4 +1,4 @@
-import { makeSimpleType, type Decl, type DeclFun, type Expr, type Identifier, type ParamDecl, type Program, type Type, makeFunType, TypeNat, TypeBool, ExtensionKeys, RecordFieldType, Pattern } from './ast'
+import { makeSimpleType, type Decl, type DeclFun, type Expr, type Identifier, type ParamDecl, type Program, type Type, makeFunType, TypeNat, TypeBool, ExtensionKeys, RecordFieldType, Pattern, simpleTypes } from './ast'
 import { Context, ContextSymbol } from './context'
 import { Errors } from './errors'
 import { protector, thrower } from './utils'
@@ -247,6 +247,8 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
       const letType = typecheckExpr(expr.body, ctx)
       ctx.popDeclarationLayer()
       return letType
+    // case 'TypeAscription':
+    //   const innerType = typecheckExpr(expr.expr, ctx)
     default:
       console.log(expr)
       throw new Error(`unexpected: ${type}`)
@@ -255,35 +257,115 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
 }
 
 function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
-  if (expected.type === 'TypeFun' && actual.type !== 'TypeFun') {
-    throw new Error(Errors.NOT_A_FUNCTION)
-  }
-  if (expected.type !== 'TypeFun' && actual.type === 'TypeFun') {
-    throw new Error(Errors.UNEXPECTED_LAMBDA)
-  }
-  if (expected.type === actual.type) {
-    if (expected.type === 'TypeFun' && actual.type === 'TypeFun') {
-      try {
-        // todo: nullary, multiparam
-        verifyTypesMatch(
-          expected.parametersTypes[0],
-          actual.parametersTypes[0],
-          ctx,
-        )
-      } catch {
-        throw new Error(Errors.UNEXPECTED_TYPE_FOR_PARAMETER)
+  switch (true) {
+    /** FUNCTIONS */
+    case expected.type === 'TypeFun' && actual.type !== 'TypeFun':
+      throw new Error(Errors.NOT_A_FUNCTION)
+    case expected.type !== 'TypeFun' && actual.type === 'TypeFun':
+      throw new Error(Errors.UNEXPECTED_LAMBDA)
+    case expected.type === 'TypeFun' && actual.type === 'TypeFun':
+      switch (true) {
+        case expected.parametersTypes.length === actual.parametersTypes.length:
+          expected.parametersTypes.forEach((param, i) => {
+            const actualParam = actual.parametersTypes[i]
+            verifyTypesMatch(param, actualParam, ctx)
+          })
+          if (expected.returnType === undefined || actual.returnType === undefined) {
+            // todo
+            if (expected.returnType !== actual.returnType) throw new Error()
+            return
+          }
+          if (expected.returnType.type !== actual.returnType.type) {
+            // todo
+            throw new Error()
+          }
+        // todo: check curring
+        case expected.parametersTypes.length > actual.parametersTypes.length:
+          actual.parametersTypes.forEach((param, i) => {
+            const expectedParam = expected.parametersTypes[i]
+            verifyTypesMatch(expectedParam, param, ctx)
+          })
+          if (!actual.returnType) {
+            // todo
+            throw new Error()
+          }
+          verifyTypesMatch(
+            {
+              type: 'TypeFun',
+              parametersTypes: expected.parametersTypes.slice(actual.parametersTypes.length),
+              returnType: expected.returnType,
+            },
+            actual.returnType,
+            ctx
+          )
+        case expected.parametersTypes.length < actual.parametersTypes.length:
+          expected.parametersTypes.forEach((param, i) => {
+            const actualParam = actual.parametersTypes[i]
+            verifyTypesMatch(param, actualParam, ctx)
+          })
+          if (!expected.returnType) {
+            // todo
+            throw new Error()
+          }
+          verifyTypesMatch(
+            expected.returnType,
+            {
+              type: 'TypeFun',
+              parametersTypes: actual.parametersTypes.slice(expected.parametersTypes.length),
+              returnType: actual.returnType,
+            },
+            ctx
+          )
       }
-      if (expected.returnType === undefined || actual.returnType === undefined) {
-        // todo
-        if (expected.returnType !== actual.returnType) {
-          throw new Error(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION + ': cannot match return type')
-        }
+      return
 
-        return
+    /** TUPLES */
+    case expected.type === 'TypeTuple' && actual.type !== 'TypeTuple':
+      // todo
+      throw new Error()
+    case expected.type !== 'TypeTuple' && actual.type === 'TypeTuple':
+      // todo
+      throw new Error()
+    case expected.type === 'TypeTuple' && actual.type === 'TypeTuple':
+      if (expected.types.length !== actual.types.length) {
+        // todo
+        throw new Error()
       }
-      verifyTypesMatch(expected.returnType, actual.returnType, ctx)
-    }
-  } else {
-    throw new Error(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
+
+      expected.types.forEach((param, i) => {
+        const actualParam = actual.types[i]
+        verifyTypesMatch(param, actualParam, ctx)
+      })
+      return
+    
+    /** RECORDS */
+    case expected.type === 'TypeRecord' && actual.type !== 'TypeRecord':
+      // todo
+      throw new Error()
+    case expected.type !== 'TypeRecord' && actual.type === 'TypeRecord':
+      // todo
+      throw new Error()
+    case expected.type === 'TypeRecord' && actual.type === 'TypeRecord':
+      expected.fieldTypes.forEach((param) => {
+        const {label, fieldType} = param
+        const actualParam = actual.fieldTypes.find(ft => ft.label === label)
+        if (!actualParam) {
+          // todo
+          throw new Error()
+        }
+        verifyTypesMatch(fieldType, actualParam.fieldType, ctx)
+      })
+      return
+
+      // todo: check subtyping?
+      // ctx.isExtended()
+    
+    /** SIMPLE TYPES */
+    case (simpleTypes as unknown as string[]).includes(expected.type) && (simpleTypes as unknown as string[]).includes(actual.type):
+      // todo
+      if (expected.type !== actual.type) throw new Error()
+      return
   }
+
+  throw new Error('Unexpected')
 }

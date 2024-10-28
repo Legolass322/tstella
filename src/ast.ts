@@ -19,6 +19,9 @@ export enum ExtensionKeys {
   tuples = 'tuples',
   records = 'records',
   let = 'let',
+  asc = 'asc',
+  sum = 'sum',
+  list = 'list',
 }
 
 export const ExtensionMap: Record<string, ExtensionKeys> = {
@@ -32,6 +35,9 @@ export const ExtensionMap: Record<string, ExtensionKeys> = {
   'tuples': ExtensionKeys.tuples,
   'records': ExtensionKeys.records,
   'let-bindings': ExtensionKeys.let,
+  'type-ascription': ExtensionKeys.asc,
+  'sum-types': ExtensionKeys.sum,
+  'lists': ExtensionKeys.list,
 }
 
 export type NaturalLiteralsExtension = { [ExtensionKeys.natural]: true }
@@ -43,6 +49,9 @@ export type PairsExtension = { [ExtensionKeys.pairs]: true }
 export type TuplesExtension = { [ExtensionKeys.tuples]: true }
 export type RecordsExtension = { [ExtensionKeys.records]: true }
 export type LetExtension = { [ExtensionKeys.let]: true }
+export type AscExtension = { [ExtensionKeys.asc]: true }
+export type SumExtension = { [ExtensionKeys.sum]: true }
+export type ListExtension = { [ExtensionKeys.list]: true }
 
 export type AllExtensions = 
   & NaturalLiteralsExtension
@@ -54,6 +63,9 @@ export type AllExtensions =
   & TuplesExtension
   & RecordsExtension
   & LetExtension
+  & AscExtension
+  & SumExtension
+  & ListExtension
 
 export type Extensions = Partial<AllExtensions>
 
@@ -77,7 +89,7 @@ type Param = ParamType<NullaryFunctionExtension>;
 
 // ---- Types
 
-const simpleTypes = ['TypeNat', 'TypeBool', 'TypeUnit', 'TypeTop', 'TypeBottom'] as const
+export const simpleTypes = ['TypeNat', 'TypeBool', 'TypeUnit', 'TypeTop', 'TypeBottom'] as const
 type SimpleTypes = typeof simpleTypes[number]
 
 type SimpleType<T extends SimpleTypes> = {
