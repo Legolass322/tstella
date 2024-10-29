@@ -1,4 +1,4 @@
-import { makeSimpleType, type Decl, type DeclFun, type Expr, type Identifier, type ParamDecl, type Program, type Type, makeFunType, TypeNat, TypeBool, ExtensionKeys, RecordFieldType, Pattern, simpleTypes } from './ast'
+import { type Decl, type DeclFun, type Expr, type Program, type Type, makeFunType, ExtensionKeys, RecordFieldType, simpleTypes, TYPE_NAT, TYPE_BOOL, TYPE_UNIT, makeTuple, TypeSum, TYPE_BOTTOM, TYPE_TOP } from './ast'
 import { Context, ContextSymbol } from './context'
 import { Errors } from './errors'
 import { protector, thrower } from './utils'
@@ -74,17 +74,21 @@ function typecheckFunctionDecl(decl: DeclFun, ctx: Context) {
   ctx.popDeclarationLayer()
 }
 
-function typecheckExpr(expr: Expr, ctx: Context): Type {
+type TypecheckExprExtra = {
+  expectedType: Type | null
+}
+
+function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Type {
   const type = expr.type
+  const expectedType = extra?.expectedType ?? null
   switch (type) {
     case 'NatPred':
     case 'Succ':
-      const expectedPredSucc = makeSimpleType('TypeNat')
-      const inner = typecheckExpr(expr.expr, ctx)
-      verifyTypesMatch(expectedPredSucc, inner, ctx)
-      return expectedPredSucc
+      const inner = typecheckExpr(expr.expr, ctx, extra)
+      verifyTypesMatch(TYPE_NAT, inner, ctx)
+      return TYPE_NAT
     case 'ConstBool':
-      return makeSimpleType('TypeBool')
+      return TYPE_BOOL
     case 'ConstInt':
       if (expr.value < 0) {
         throw new Error(Errors.ILLEGAL_NEGATIVE_LITERAL)
@@ -92,47 +96,38 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
       if (expr.value > 1 && !ctx.isExtended(ExtensionKeys.natural)) {
         throw new Error('todo ConstInt natural')
       }
-      return makeSimpleType('TypeNat')
+      return TYPE_NAT
     case 'NatIsZero':
-      const expectedIsZero = makeSimpleType('TypeNat')
-      const innerIsZero = typecheckExpr(expr.expr, ctx)
-      verifyTypesMatch(expectedIsZero, innerIsZero, ctx)
-      return makeSimpleType('TypeBool')
+      const innerIsZero = typecheckExpr(expr.expr, ctx, { expectedType: TYPE_NAT })
+      verifyTypesMatch(TYPE_NAT, innerIsZero, ctx)
+      return TYPE_BOOL
     case 'NatRec':
       const from = expr.n
       const initial = expr.initial
       const step = expr.step
 
-      verifyTypesMatch(makeSimpleType('TypeNat'), typecheckExpr(from, ctx), ctx)
-      
+      verifyTypesMatch(TYPE_NAT, typecheckExpr(from, ctx), ctx)
+
       const initialType = typecheckExpr(initial, ctx)
       const stepType = typecheckExpr(step, ctx)
 
       verifyTypesMatch(
-        {
-          type: 'TypeFun',
-          parametersTypes: [makeSimpleType('TypeNat')],
-          returnType: {
-            type: 'TypeFun',
-            parametersTypes: [initialType],
-            returnType: initialType
-          }
-        },
+        makeFunType([TYPE_NAT], makeFunType([initialType], initialType)),
         stepType,
         ctx,
       )
 
       return initialType
     case 'If':
-      const conditionType = makeSimpleType('TypeBool')
-      const actualConditionType = typecheckExpr(expr.condition, ctx)
-      verifyTypesMatch(conditionType, actualConditionType, ctx)
-      const thenType = typecheckExpr(expr.thenExpr, ctx)
-      const elseType = typecheckExpr(expr.elseExpr, ctx)
+      const actualConditionType = typecheckExpr(expr.condition, ctx, { expectedType: TYPE_BOOL })
+      verifyTypesMatch(TYPE_BOOL, actualConditionType, ctx)
+      const thenType = typecheckExpr(expr.thenExpr, ctx, extra)
+      const elseType = typecheckExpr(expr.elseExpr, ctx, extra)
       verifyTypesMatch(thenType, elseType, ctx)
       return thenType
     case 'Application':
       const { function: func, arguments: args } = expr
+      // todo: extra
       const funcType = typecheckExpr(func, ctx)
 
       if (funcType.type !== 'TypeFun') {
@@ -144,8 +139,8 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
         [!ctx.isExtended(ExtensionKeys.nullary) && !args.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
       ])
       for (let i = 0; i < args.length; i++) {
-        const argType = typecheckExpr(args[i], ctx)
         const expectedArgType = funcType.parametersTypes[i]
+        const argType = typecheckExpr(args[i], ctx, { expectedType: expectedArgType })
         verifyTypesMatch(expectedArgType, argType, ctx)
       }
       // todo
@@ -158,41 +153,35 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
         [!ctx.isExtended(ExtensionKeys.nullary) && !parameters.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
       ])
 
+      // todo: extra
       ctx.pushDeclarationLayer(parameters)
       const returnType = typecheckExpr(returnValue, ctx)
       ctx.popDeclarationLayer()
 
-      return {
-        type: 'TypeFun',
-        parametersTypes: parameters.map(param => param.paramType),
-        returnType: returnType
-      }
+      return makeFunType(parameters.map(param => param.paramType), returnType)
     case 'Var':
       const declarationOfVar = ctx.findDeclaration(expr.name)
       // todo
       return declarationOfVar.declType
     case 'Sequence':
       const { expr1, expr2 } = expr
-      const expr1Type = typecheckExpr(expr1, ctx)
+      const expr1Type = typecheckExpr(expr1, ctx, extra)
       if (expr2) {
-        const expr2Type = typecheckExpr(expr2, ctx)
+        const expr2Type = typecheckExpr(expr2, ctx, extra)
         return expr2Type
       }
       return expr1Type
     case 'Unit':
       // todo
       thrower([[!ctx.isExtended(ExtensionKeys.unit), 'no #unit - unsupported']])
-      return makeSimpleType('TypeUnit')
+      return TYPE_UNIT
     case 'Tuple':
       thrower([
         [expr.exprs.length === 2 && !ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs), 'no #pairs - unsupported'],
         [!ctx.isExtended(ExtensionKeys.tuples), 'no #tuple - unsupported'],
       ])
       const tupleExprTypes = expr.exprs.map(e => typecheckExpr(e, ctx))
-      return {
-        type: 'TypeTuple',
-        types: tupleExprTypes,
-      }
+      return makeTuple(tupleExprTypes)
     case 'DotTuple':
       thrower([[!ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs), 'no #tuple - unsupported']])
       const tupleType = typecheckExpr(expr.expr, ctx)
@@ -247,8 +236,112 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
       const letType = typecheckExpr(expr.body, ctx)
       ctx.popDeclarationLayer()
       return letType
-    // case 'TypeAscription':
-    //   const innerType = typecheckExpr(expr.expr, ctx)
+    case 'TypeAscription':
+      const innerType = typecheckExpr(expr.expr, ctx, { expectedType: expr.ascribedType })
+      verifyTypesMatch(innerType, expr.ascribedType, ctx)
+      return expr.ascribedType
+    case 'Inl':
+    case 'Inr':
+      thrower([[!ctx.isExtended(ExtensionKeys.sum), 'unsupported - no #sum-types']])
+
+      // todo, expect here type. Check with subtyping
+      if (!expectedType) {
+        throw new Error()
+      }
+      if (expectedType.type !== 'TypeSum') {
+        throw new Error()
+      }
+      const arg = expr.type === 'Inl' ? 'left' : 'right'
+      const complementArg = expr.type !== 'Inl' ? 'left' : 'right'
+      const expectedTypePart = expectedType[arg]
+      const expectedTypeComplement = expectedType[complementArg]
+      const inffered = typecheckExpr(expr.expr, ctx, { expectedType: expectedTypePart })
+      // todo
+      return {
+        type: 'TypeSum',
+        [arg]: inffered,
+        [complementArg]: expectedTypeComplement,
+      } as unknown as TypeSum
+    case 'List':
+      // todo: check list type for details to implement
+      // todo: expect here type. Check with subtyping
+      if (!expectedType) {
+        throw new Error()
+      }
+      if (expectedType.type !== 'TypeList') {
+        throw new Error()
+      }
+      if (!expectedType.types.length) {
+        // todo: unexpected to not have at least one type
+        throw new Error()
+      }
+      const expectedItemType = expectedType.types[0]
+
+      if (!expr.exprs.length) {
+        return {
+          type: 'TypeList',
+          types: [TYPE_TOP]
+        }
+      }
+
+      for (const item of expr.exprs) {
+        const itemType = typecheckExpr(item, ctx, { expectedType: expectedItemType })
+        verifyTypesMatch(expectedItemType, itemType, ctx)
+      }
+      return {
+        type: 'TypeList',
+        types: [expectedItemType]
+      }
+    case 'Cons':
+      // todo: check list type for details to implement
+      // todo: expect here type. Check with subtyping
+      if (!expectedType) {
+        throw new Error()
+      }
+      if (expectedType.type !== 'TypeList') {
+        throw new Error()
+      }
+      if (!expectedType.types.length) {
+        // todo: unexpected to not have at least one type
+        throw new Error()
+      }
+      const expectedConsItemType = expectedType.types[0]
+      const headType = typecheckExpr(expr.head, ctx, { expectedType: expectedConsItemType })
+      const tailType = typecheckExpr(expr.tail, ctx, { expectedType: { type: 'TypeList', types: [expectedConsItemType] } })
+      if (tailType.type !== 'TypeList') {
+        // todo
+        throw new Error()
+      }
+      verifyTypesMatch(headType, expectedConsItemType, ctx)
+      return {
+        type: 'TypeList',
+        types: [expectedConsItemType]
+      }
+    case 'ListHead':
+      const listHeadListType = typecheckExpr(expr.expr, ctx, extra)
+      if (listHeadListType.type !== 'TypeList') {
+        // todo
+        throw new Error()
+      }
+      if (!listHeadListType.types.length) {
+        // todo
+        throw new Error()
+      }
+      return listHeadListType.types[0]
+    case 'ListTail':
+      const listTailListType = typecheckExpr(expr.expr, ctx, extra)
+      if (listTailListType.type !== 'TypeList') {
+        // todo
+        throw new Error()
+      }
+      return listTailListType
+    case 'ListIsEmpty':
+      const ListIsEmptyListType = typecheckExpr(expr.expr, ctx, extra)
+      if (ListIsEmptyListType.type !== 'TypeList') {
+        // todo
+        throw new Error()
+      }
+      return TYPE_BOOL
     default:
       console.log(expr)
       throw new Error(`unexpected: ${type}`)
@@ -258,6 +351,32 @@ function typecheckExpr(expr: Expr, ctx: Context): Type {
 
 function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
   switch (true) {
+    /** SUMS */
+    case expected.type === 'TypeSum' && actual.type !== 'TypeSum':
+      // todo
+      throw new Error()
+    case expected.type !== 'TypeSum' && actual.type === 'TypeSum':
+      // todo
+      throw new Error()
+    case expected.type === 'TypeSum' && actual.type === 'TypeSum':
+      // todo: check subtyping
+      verifyTypesMatch(expected.left, actual.left, ctx)
+      verifyTypesMatch(expected.right, actual.right, ctx)
+      return
+
+    /** LISTS */
+    case expected.type === 'TypeList' && actual.type !== 'TypeList':
+      // todo
+      throw new Error()
+    case expected.type !== 'TypeList' && actual.type === 'TypeList':
+      // todo
+      throw new Error()
+    case expected.type === 'TypeList' && actual.type === 'TypeList':
+      // todo: check subtyping
+      thrower([[!expected.types.length || !actual.types.length, 'unexpected empty lists types']])
+      verifyTypesMatch(expected.types[0], actual.types[0], ctx)
+      return
+
     /** FUNCTIONS */
     case expected.type === 'TypeFun' && actual.type !== 'TypeFun':
       throw new Error(Errors.NOT_A_FUNCTION)
@@ -290,11 +409,7 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
             throw new Error()
           }
           verifyTypesMatch(
-            {
-              type: 'TypeFun',
-              parametersTypes: expected.parametersTypes.slice(actual.parametersTypes.length),
-              returnType: expected.returnType,
-            },
+            makeFunType(expected.parametersTypes.slice(actual.parametersTypes.length), expected.returnType),
             actual.returnType,
             ctx
           )
@@ -309,11 +424,7 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
           }
           verifyTypesMatch(
             expected.returnType,
-            {
-              type: 'TypeFun',
-              parametersTypes: actual.parametersTypes.slice(expected.parametersTypes.length),
-              returnType: actual.returnType,
-            },
+            makeFunType(actual.parametersTypes.slice(expected.parametersTypes.length), actual.returnType),
             ctx
           )
       }
@@ -337,7 +448,7 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
         verifyTypesMatch(param, actualParam, ctx)
       })
       return
-    
+
     /** RECORDS */
     case expected.type === 'TypeRecord' && actual.type !== 'TypeRecord':
       // todo
@@ -347,7 +458,7 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
       throw new Error()
     case expected.type === 'TypeRecord' && actual.type === 'TypeRecord':
       expected.fieldTypes.forEach((param) => {
-        const {label, fieldType} = param
+        const { label, fieldType } = param
         const actualParam = actual.fieldTypes.find(ft => ft.label === label)
         if (!actualParam) {
           // todo
@@ -357,9 +468,9 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
       })
       return
 
-      // todo: check subtyping?
-      // ctx.isExtended()
-    
+    // todo: check subtyping?
+    // ctx.isExtended()
+
     /** SIMPLE TYPES */
     case (simpleTypes as unknown as string[]).includes(expected.type) && (simpleTypes as unknown as string[]).includes(actual.type):
       // todo

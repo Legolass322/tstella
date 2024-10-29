@@ -108,6 +108,12 @@ export function makeSimpleType(type: SimpleTypes) {
   return {type}
 }
 
+export const TYPE_NAT = makeSimpleType('TypeNat')
+export const TYPE_BOOL = makeSimpleType('TypeBool')
+export const TYPE_UNIT = makeSimpleType('TypeUnit')
+export const TYPE_TOP = makeSimpleType('TypeTop')
+export const TYPE_BOTTOM = makeSimpleType('TypeBottom')
+
 export interface TypeFun {
   type: 'TypeFun';
   // TODO: handle multi-param and nullary extensions being enabled, and make [Type] (tuple type with 1 element) the default
@@ -115,7 +121,7 @@ export interface TypeFun {
   returnType?: Type;
 }
 
-export function makeFunType(parametersTypes: Type[], returnType?: Type) {
+export function makeFunType(parametersTypes: Type[], returnType?: Type): TypeFun {
   return {
     type: 'TypeFun',
     parametersTypes,
@@ -137,6 +143,14 @@ export interface TypeTuple {
   type: 'TypeTuple';
   types: Type[];
 }
+
+export function makeTuple(types: Type[]): TypeTuple {
+  return {
+    type: 'TypeTuple',
+    types,
+  }
+}
+
 export interface RecordFieldType {
   type: 'RecordFieldType';
   label: Identifier;
@@ -199,7 +213,7 @@ export interface Cons {
   head: Expr;
   tail: Expr;
 }
-type UnaryFunction<T extends Exclude<string, T>> = {
+type UnaryFunction<T extends string> = {
   type: T;
   expr: Expr;
 };
@@ -275,7 +289,7 @@ export interface TypeAscription {
   expr: Expr;
   ascribedType: Type;
 }
-type BinaryOp<T extends Exclude<string, T>> = {
+type BinaryOp<T extends string> = {
   type: T;
   left: Expr;
   right: Expr;
