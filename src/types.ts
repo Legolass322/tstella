@@ -20,3 +20,7 @@ export function makeInferType(origin: Expr, infer?: TypeWithUndefined) {
 export type GeneralType = TypeWithUndefined | TypeInferred
 
 export type GeneralDecl = Decl | ParamDecl
+
+export type TypecheckExprExtra = {
+  expectedType: Type | null
+}

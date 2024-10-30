@@ -1,0 +1,37 @@
+language core;
+extend with #numeric-literals, #records, #multiparameter-functions;
+extend with #tuples, #nullary-functions;
+extend with #let-bindings, #unit-type;
+
+fn add_two(n : Nat) -> Nat {
+  return succ(succ(n))
+}
+
+fn my_add(n : Nat) -> (fn(Nat) -> Nat) {
+    return fn(m : Nat) {
+        return 0
+    }
+}
+
+fn iterate(n : Nat) -> { current : Nat, next : Nat} {
+    return { current = n, next = succ(n) }
+}
+
+fn noop(_ : {}) -> {} {
+    return {}
+}
+
+fn third(tup : {Nat, Nat, Nat}) -> Nat {
+    return tup.2
+}
+
+fn test_let() -> Nat {
+    return let one = succ(0), u = unit in
+        let two = succ(one) in
+        let three = succ(two) in
+        my_add(one)(my_add(two, three))
+}
+
+fn main(n : Nat) -> Nat {
+    return my_add(n)(iterate( third({n, succ(n), succ(succ(n))}) ).next)
+}
