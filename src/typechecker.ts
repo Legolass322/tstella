@@ -53,7 +53,7 @@ function typecheckFunctionDecl(decl: DeclFun, ctx: Context) {
   ctx.pushDeclarationLayer(decl.parameters)
 
   thrower([
-    [!ctx.isExtended(ExtensionKeys.multiparam) && decl.parameters.length > 1, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+    [!ctx.isExtendedSome(ExtensionKeys.multiparam, ExtensionKeys.curring) && decl.parameters.length > 1, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
     [!ctx.isExtended(ExtensionKeys.nullary) && !decl.parameters.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
   ])
 
@@ -63,10 +63,9 @@ function typecheckFunctionDecl(decl: DeclFun, ctx: Context) {
     })
   }
 
-  const returnType = typecheckExpr(decl.returnValue, ctx, {expectedType: decl.returnType ?? null})
+  const returnType = typecheckExpr(decl.returnValue, ctx, { expectedType: decl.returnType ?? null })
   if (decl.returnType === undefined || returnType === undefined) {
-    // todo
-    throw new Error()
+    throw new TCSimpleError(Errors.MUST_RETURN)
   }
   verifyTypesMatch(decl.returnType, returnType, ctx)
 
@@ -136,7 +135,7 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
         }
       }
       ctx.popDeclarationLayer()
-    
+
       return caseBodyInferredType!
     case 'Var':
       const declarationOfVar = ctx.findDeclaration(expr.name)
@@ -171,6 +170,7 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
       ctx.popDeclarationLayer()
       return letType
     case 'Variant':
+      thrower([[!ctx.isExtended(ExtensionKeys.variants), new TCNotSupportedError(expr, ExtensionKeys.variants)]])
       if (!expectedType) {
         throw new TCSimpleError(Errors.AMBIGUOUS_VARIANT_TYPE)
       }
@@ -184,7 +184,7 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
       if (field === undefined) {
         throw new Error(Errors.UNEXPECTED_VARIANT_LABEL)
       }
-      const fieldType = typecheckExpr(value, ctx, {expectedType: field.fieldType!})
+      const fieldType = typecheckExpr(value, ctx, { expectedType: field.fieldType! })
       verifyTypesMatch(field.fieldType!, fieldType, ctx)
       return expectedType
     default:
@@ -196,7 +196,7 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
 
 function checkPattern(pattern: Pattern, type: Type, ctx: Context, origin?: Pattern | PatternBinding) {
   switch (pattern.type) {
-    case 'PatternVar': 
+    case 'PatternVar':
       ctx.addDeclarationToLayer({
         name: pattern.name,
         declType: type,
@@ -255,18 +255,16 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
   switch (true) {
     /** VARIANTS */
     case expected.type === 'TypeVariant' && actual.type !== 'TypeVariant':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
     case expected.type !== 'TypeVariant' && actual.type === 'TypeVariant':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_VARIANT)
     case expected.type === 'TypeVariant' && actual.type === 'TypeVariant':
       const actualFields = actual.fieldTypes
       for (const { label, fieldType } of expected.fieldTypes) {
         const actualField = actualFields.find((f) => f.label === label)
         if (!actualField) {
           // Expected a field but did not find it
-          throw new Error(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
+          throw new TCSimpleError(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
         }
         verifyTypesMatch(fieldType!, actualField.fieldType!, ctx)
       }
@@ -279,33 +277,27 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
         )
       ) {
         // There is an actual field that was not expected
-        throw new Error(Errors.UNEXPECTED_VARIANT_LABEL)
+        throw new TCSimpleError(Errors.UNEXPECTED_VARIANT_LABEL)
       }
       return
 
     /** SUMS */
     case expected.type === 'TypeSum' && actual.type !== 'TypeSum':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
     case expected.type !== 'TypeSum' && actual.type === 'TypeSum':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_INJECTION)
     case expected.type === 'TypeSum' && actual.type === 'TypeSum':
-      // todo: check subtyping
       verifyTypesMatch(expected.left, actual.left, ctx)
       verifyTypesMatch(expected.right, actual.right, ctx)
       return
 
     /** LISTS */
     case expected.type === 'TypeList' && actual.type !== 'TypeList':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
     case expected.type !== 'TypeList' && actual.type === 'TypeList':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_LIST)
     case expected.type === 'TypeList' && actual.type === 'TypeList':
-      // todo: check subtyping
-      thrower([[!expected.types.length || !actual.types.length, 'unexpected empty lists types']])
+      thrower([[!expected.types.length || !actual.types.length, new TCSimpleError(Errors.AMBIGUOUS_LIST_TYPE)]])
       verifyTypesMatch(expected.types[0], actual.types[0], ctx)
       return
 
@@ -322,24 +314,25 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
             verifyTypesMatch(param, actualParam, ctx)
           })
           if (expected.returnType === undefined || actual.returnType === undefined) {
-            // todo
-            if (expected.returnType !== actual.returnType) throw new Error()
+            if (expected.returnType !== actual.returnType) throw new TCSimpleError(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
             return
           }
           if (expected.returnType.type !== actual.returnType.type) {
-            // todo
-            throw new Error()
+            throw new TCSimpleError(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
           }
           return
-        // todo: check curring
+        case !ctx.isExtended(ExtensionKeys.curring):
+          if (expected.parametersTypes.length !== actual.parametersTypes.length) {
+            throw new TCSimpleError(Errors.INCORRECT_NUMBER_OF_ARGUMENTS)
+          }
+          return
         case expected.parametersTypes.length > actual.parametersTypes.length:
           actual.parametersTypes.forEach((param, i) => {
             const expectedParam = expected.parametersTypes[i]
             verifyTypesMatch(expectedParam, param, ctx)
           })
           if (!actual.returnType) {
-            // todo
-            throw new Error()
+            throw new TCSimpleError(Errors.INCORRECT_NUMBER_OF_ARGUMENTS, ['Actual function does not cover all parameters of expected'])
           }
           verifyTypesMatch(
             makeFunType(expected.parametersTypes.slice(actual.parametersTypes.length), expected.returnType),
@@ -353,8 +346,7 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
             verifyTypesMatch(param, actualParam, ctx)
           })
           if (!expected.returnType) {
-            // todo
-            throw new Error()
+            throw new TCSimpleError(Errors.INCORRECT_NUMBER_OF_ARGUMENTS, ['Actual function goes out of bound of expected parameters'])
           }
           verifyTypesMatch(
             expected.returnType,
@@ -367,15 +359,16 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
 
     /** TUPLES */
     case expected.type === 'TypeTuple' && actual.type !== 'TypeTuple':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.NOT_A_TUPLE)
     case expected.type !== 'TypeTuple' && actual.type === 'TypeTuple':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_TUPLE)
     case expected.type === 'TypeTuple' && actual.type === 'TypeTuple':
       if (expected.types.length !== actual.types.length) {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(
+          Errors.INCORRECT_TUPLE_BOUNDS,
+          [`expected ${expected.types.length}`, `got ${actual.types.length}`],
+          { delim: ', ' }
+        )
       }
 
       expected.types.forEach((param, i) => {
@@ -386,30 +379,40 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
 
     /** RECORDS */
     case expected.type === 'TypeRecord' && actual.type !== 'TypeRecord':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.NOT_A_RECORD)
     case expected.type !== 'TypeRecord' && actual.type === 'TypeRecord':
-      // todo
-      throw new Error()
+      throw new TCSimpleError(Errors.UNEXPECTED_RECORD)
     case expected.type === 'TypeRecord' && actual.type === 'TypeRecord':
+      const missing: string[] = []
+      const ok: { fieldType: Type, actualParam: RecordFieldType, label: string }[] = []
+
       expected.fieldTypes.forEach((param) => {
         const { label, fieldType } = param
         const actualParam = actual.fieldTypes.find(ft => ft.label === label)
         if (!actualParam) {
-          // todo
-          throw new Error()
+          missing.push(label)
+        } else {
+          ok.push({ fieldType, actualParam, label })
         }
+      })
+
+      if (missing.length) {
+        throw new TCSimpleError(Errors.MISSING_RECORD_FIELDS, ['Missing fields', missing.join(', ')])
+      }
+
+      const unexpected = actual.fieldTypes.filter(ft => !ok.find(okFt => okFt.label === ft.label))
+      if (unexpected.length) {
+        throw new TCSimpleError(Errors.UNEXPECTED_RECORD_FIELDS, ['Unexpected fields', unexpected.join(', ')])
+      }
+
+      ok.forEach(({ fieldType, actualParam }) => {
         verifyTypesMatch(fieldType, actualParam.fieldType, ctx)
       })
       return
 
-    // todo: check subtyping?
-    // ctx.isExtended()
-
     /** SIMPLE TYPES */
     case (simpleTypes as unknown as string[]).includes(expected.type) && (simpleTypes as unknown as string[]).includes(actual.type):
-      // todo
-      if (expected.type !== actual.type) throw new Error()
+      if (expected.type !== actual.type) throw new TCSimpleError(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
       return
   }
 
@@ -428,7 +431,7 @@ function typecheckNatRelatedExpr<T extends NatRelatedExpr, _E = Exclude<NatRelat
     case 'Multiply':
     case 'Subtract':
     case 'Divide':
-      const {left, right} = expr
+      const { left, right } = expr
       const leftType = typecheckExpr(left, ctx, extra)
       const rightType = typecheckExpr(right, ctx, extra)
       verifyTypesMatch(TYPE_NAT, leftType, ctx)
@@ -503,17 +506,14 @@ function typecheckListRelatedExpr<T extends ListRelatedExpr, _E = Exclude<ListRe
   const expectedType = extra?.expectedType ?? null
   switch (expr.type) {
     case 'List':
-      // todo: check list type for details to implement
-      // todo: expect here type. Check with subtyping
       if (!expectedType) {
-        throw new Error()
+        throw new TCSimpleError(Errors.AMBIGUOUS_LIST_TYPE)
       }
       if (expectedType.type !== 'TypeList') {
-        throw new Error()
+        throw new TCSimpleError(Errors.UNEXPECTED_LIST)
       }
       if (!expectedType.types.length) {
-        // todo: unexpected to not have at least one type
-        throw new Error()
+        throw new TCSimpleError(Errors.AMBIGUOUS_LIST_TYPE)
       }
       const expectedItemType = expectedType.types[0]
 
@@ -533,24 +533,20 @@ function typecheckListRelatedExpr<T extends ListRelatedExpr, _E = Exclude<ListRe
         types: [expectedItemType]
       }
     case 'Cons':
-      // todo: check list type for details to implement
-      // todo: expect here type. Check with subtyping
       if (!expectedType) {
-        throw new Error()
+        throw new TCSimpleError(Errors.AMBIGUOUS_LIST_TYPE)
       }
       if (expectedType.type !== 'TypeList') {
-        throw new Error()
+        throw new TCSimpleError(Errors.UNEXPECTED_LIST)
       }
       if (!expectedType.types.length) {
-        // todo: unexpected to not have at least one type
-        throw new Error()
+        throw new TCSimpleError(Errors.AMBIGUOUS_LIST_TYPE)
       }
       const expectedConsItemType = expectedType.types[0]
       const headType = typecheckExpr(expr.head, ctx, { expectedType: expectedConsItemType })
       const tailType = typecheckExpr(expr.tail, ctx, { expectedType: { type: 'TypeList', types: [expectedConsItemType] } })
       if (tailType.type !== 'TypeList') {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.NOT_A_LIST)
       }
       verifyTypesMatch(headType, expectedConsItemType, ctx)
       return {
@@ -560,26 +556,22 @@ function typecheckListRelatedExpr<T extends ListRelatedExpr, _E = Exclude<ListRe
     case 'ListHead':
       const listHeadListType = typecheckExpr(expr.expr, ctx, extra)
       if (listHeadListType.type !== 'TypeList') {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.NOT_A_LIST)
       }
       if (!listHeadListType.types.length) {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.AMBIGUOUS_LIST_TYPE)
       }
       return listHeadListType.types[0]
     case 'ListTail':
       const listTailListType = typecheckExpr(expr.expr, ctx, extra)
       if (listTailListType.type !== 'TypeList') {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.NOT_A_LIST)
       }
       return listTailListType
     case 'ListIsEmpty':
       const ListIsEmptyListType = typecheckExpr(expr.expr, ctx, extra)
       if (ListIsEmptyListType.type !== 'TypeList') {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.NOT_A_LIST)
       }
       return TYPE_BOOL
     default:
@@ -593,14 +585,14 @@ function typecheckARelatedExpr<T extends ARelatedExpr, _E = Exclude<ARelatedExpr
   switch (expr.type) {
     case 'Application':
       const { function: func, arguments: args } = expr
-      // todo: extra
+      // todo: extra?
       const funcType = typecheckExpr(func, ctx)
 
       if (funcType.type !== 'TypeFun') {
         throw new Error(Errors.NOT_A_FUNCTION)
       }
       thrower([
-        [!ctx.isExtended(ExtensionKeys.multiparam) && args.length > 1, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
+        [!ctx.isExtendedSome(ExtensionKeys.multiparam, ExtensionKeys.curring) && args.length > 1, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
         [!ctx.isExtended(ExtensionKeys.nullary) && !args.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
       ])
       for (let i = 0; i < Math.min(args.length, funcType.parametersTypes.length); i++) {
@@ -608,15 +600,13 @@ function typecheckARelatedExpr<T extends ARelatedExpr, _E = Exclude<ARelatedExpr
         const argType = typecheckExpr(args[i], ctx, { expectedType: expectedArgType })
         verifyTypesMatch(expectedArgType, argType, ctx)
       }
-      // todo: curring
-      // if (ctx.isExtend(...curring))...
+
       let overflowedArgs: Expr[] = args.slice(funcType.parametersTypes.length)
       let rType = funcType.returnType
-      if (true && overflowedArgs.length) {
+      if (ctx.isExtended(ExtensionKeys.curring) && overflowedArgs.length) {
         while (overflowedArgs.length) {
           if (rType?.type !== 'TypeFun') {
-            // todo
-            throw new Error(Errors.INCORRECT_NUMBER_OF_ARGUMENTS)
+            throw new TCSimpleError(Errors.INCORRECT_NUMBER_OF_ARGUMENTS)
           }
           const processedArgs = Math.min(overflowedArgs.length, rType.parametersTypes.length)
           for (let i = 0; i < processedArgs; i++) {
@@ -629,7 +619,6 @@ function typecheckARelatedExpr<T extends ARelatedExpr, _E = Exclude<ARelatedExpr
           if (overflowedArgs.length) {
             rType = rType.returnType
           } else if (processedArgs === rType.parametersTypes.length) {
-            // todo
             return rType.returnType!
           } else {
             return makeFunType(
@@ -638,11 +627,9 @@ function typecheckARelatedExpr<T extends ARelatedExpr, _E = Exclude<ARelatedExpr
             )
           }
         }
-      } else if (false && overflowedArgs.length) {
-        // todo
-        throw new Error(Errors.INCORRECT_NUMBER_OF_ARGUMENTS)
+      } else if (!ctx.isExtended(ExtensionKeys.curring) && overflowedArgs.length) {
+        throw new TCSimpleError(Errors.INCORRECT_NUMBER_OF_ARGUMENTS)
       }
-      // todo
       return rType!
     case 'Abstraction':
       const { parameters, returnValue } = expr
@@ -652,9 +639,9 @@ function typecheckARelatedExpr<T extends ARelatedExpr, _E = Exclude<ARelatedExpr
         [!ctx.isExtended(ExtensionKeys.nullary) && !parameters.length, Errors.INCORRECT_NUMBER_OF_ARGUMENTS],
       ])
 
-      // todo: extra
       ctx.pushDeclarationLayer(parameters)
-      const returnType = typecheckExpr(returnValue, ctx)
+      const expectedReturnType = extra?.expectedType ? extra.expectedType.type === 'TypeFun' ? extra.expectedType.returnType : null : null
+      const returnType = typecheckExpr(returnValue, ctx, { expectedType: expectedReturnType ?? null })
       ctx.popDeclarationLayer()
 
       return makeFunType(parameters.map(param => param.paramType), returnType)
@@ -670,21 +657,19 @@ function typecheckSumRelatedExpr<T extends SumRelatedExpr, _E = Exclude<SumRelat
   switch (expr.type) {
     case 'Inl':
     case 'Inr':
-      thrower([[!ctx.isExtended(ExtensionKeys.sum), 'unsupported - no #sum-types']])
+      thrower([[!ctx.isExtended(ExtensionKeys.sum), new TCNotSupportedError(expr, ExtensionKeys.sum)]])
 
-      // todo, expect here type. Check with subtyping
       if (!expectedType) {
-        throw new Error()
+        throw new TCSimpleError(Errors.AMBIGUOUS_SUM_TYPE)
       }
       if (expectedType.type !== 'TypeSum') {
-        throw new Error()
+        throw new TCSimpleError(Errors.UNEXPECTED_SUM)
       }
       const arg = expr.type === 'Inl' ? 'left' : 'right'
       const complementArg = expr.type !== 'Inl' ? 'left' : 'right'
       const expectedTypePart = expectedType[arg]
       const expectedTypeComplement = expectedType[complementArg]
       const inffered = typecheckExpr(expr.expr, ctx, { expectedType: expectedTypePart })
-      // todo
       return {
         type: 'TypeSum',
         [arg]: inffered,
@@ -716,8 +701,7 @@ function typecheckTupleRelatedExpr<T extends TupleRelatedExpr, _E = Exclude<Tupl
       ]])
       const tupleType = typecheckExpr(expr.expr, ctx)
       if (tupleType.type !== 'TypeTuple') {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.UNEXPECTED_TUPLE)
       }
       thrower([
         [
@@ -737,7 +721,7 @@ type RecordRelatedExpr = SRecord | DotRecord
 function typecheckRecordRelatedExpr<T extends RecordRelatedExpr, _E = Exclude<RecordRelatedExpr, T>>(expr: T, ctx: Context, extra?: TypecheckExprExtra): Type {
   switch (expr.type) {
     case 'SRecord':
-      thrower([[!ctx.isExtended(ExtensionKeys.records), 'no #records - unsupported']])
+      thrower([[!ctx.isExtended(ExtensionKeys.records), new TCNotSupportedError(expr, ExtensionKeys.records)]])
       const fields: RecordFieldType[] = expr.bindings.map(binding => ({
         type: 'RecordFieldType',
         label: binding.name,
@@ -748,16 +732,14 @@ function typecheckRecordRelatedExpr<T extends RecordRelatedExpr, _E = Exclude<Re
         fieldTypes: fields,
       }
     case 'DotRecord':
-      thrower([[!ctx.isExtended(ExtensionKeys.records), 'no #records - unsupported']])
-      const recordType = typecheckExpr(expr.expr, ctx)
+      thrower([[!ctx.isExtended(ExtensionKeys.records), new TCNotSupportedError(expr, ExtensionKeys.records)]])
+      const recordType = typecheckExpr(expr.expr, ctx, extra)
       if (recordType.type !== 'TypeRecord') {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.UNEXPECTED_RECORD)
       }
       const field = recordType.fieldTypes.find(r => r.label === expr.label)
       if (!field) {
-        // todo
-        throw new Error()
+        throw new TCSimpleError(Errors.MISSING_RECORD_FIELDS, [`Missing .${expr.label}`])
       }
       return field.fieldType
     default:

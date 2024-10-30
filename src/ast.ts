@@ -22,6 +22,8 @@ export enum ExtensionKeys {
   asc = 'asc',
   sum = 'sum',
   list = 'list',
+  variants = 'variants',
+  curring = 'curring',
 }
 
 export const ExtensionMap: Record<string, ExtensionKeys> = {
@@ -38,6 +40,8 @@ export const ExtensionMap: Record<string, ExtensionKeys> = {
   'type-ascription': ExtensionKeys.asc,
   'sum-types': ExtensionKeys.sum,
   'lists': ExtensionKeys.list,
+  'variants': ExtensionKeys.variants,
+  'curried-multiparameter-functions': ExtensionKeys.curring,
 }
 
 export type NaturalLiteralsExtension = { [ExtensionKeys.natural]: true }
@@ -52,6 +56,8 @@ export type LetExtension = { [ExtensionKeys.let]: true }
 export type AscExtension = { [ExtensionKeys.asc]: true }
 export type SumExtension = { [ExtensionKeys.sum]: true }
 export type ListExtension = { [ExtensionKeys.list]: true }
+export type VariantExtension = { [ExtensionKeys.variants]: true }
+export type CurringExtension = { [ExtensionKeys.curring]: true }
 
 export type AllExtensions = 
   & NaturalLiteralsExtension
@@ -66,6 +72,8 @@ export type AllExtensions =
   & AscExtension
   & SumExtension
   & ListExtension
+  & VariantExtension
+  & CurringExtension
 
 export type Extensions = Partial<AllExtensions>
 
