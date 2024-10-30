@@ -1,0 +1,18 @@
+language core;
+
+extend with #records, #tuples, #pairs, #unit-type;
+extend with #nested-function-declarations, #numeric-literals, #arithmetic-operators;
+extend with #let-bindings, #natural-literals, #nullary-functions, #multiparameter-functions;
+extend with #type-aliases, #sum-types, #variants, #lists, #recursive-types;
+
+// Variants and unit
+fn attempt(get_one? : Bool) -> <| value : Nat, failure : Unit |> {
+  return
+    if get_one?
+      then <| value = 0 |>
+      else <| failure = unit |>
+}
+
+fn main() {
+    return 0
+}

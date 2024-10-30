@@ -1,4 +1,4 @@
-import { DeclFun, Extension, ExtensionKeys, ExtensionMap, Extensions, Identifier, ParamDecl, PatternBinding, Type } from "./ast";
+import { DeclFun, Extension, ExtensionKeys, ExtensionMap, Extensions, Identifier, ParamDecl, Pattern, PatternBinding, Type } from "./ast";
 import { Errors } from "./errors";
 import { GeneralDecl } from "./types";
 
@@ -7,7 +7,7 @@ export const ContextSymbol = Symbol('ContextSymbol')
 type ContextDecl = {
   name: Identifier
   declType: Type
-  origin: GeneralDecl | PatternBinding
+  origin: GeneralDecl | PatternBinding | Pattern
   [ContextSymbol]: 'ContextDecl'
 }
 

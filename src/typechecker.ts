@@ -1,4 +1,4 @@
-import { type Decl, type DeclFun, type Expr, type Program, type Type, makeFunType, ExtensionKeys, RecordFieldType, simpleTypes, TYPE_NAT, TYPE_BOOL, TYPE_UNIT, makeTuple, TypeSum, TYPE_BOTTOM, TYPE_TOP, Succ, NatPred, NatIsZero, NatRec, Add, Multiply, ConstInt, ConstBool, If, LogicalAnd, LogicalNot, LogicalOr, List, Cons, ListHead, ListTail, ListIsEmpty, Abstraction, Application, Inl, Inr, DotTuple, Tuple, DotRecord, SRecord } from './ast'
+import { type Decl, type DeclFun, type Expr, type Program, type Type, makeFunType, ExtensionKeys, RecordFieldType, simpleTypes, TYPE_NAT, TYPE_BOOL, TYPE_UNIT, makeTuple, TypeSum, TYPE_BOTTOM, TYPE_TOP, Succ, NatPred, NatIsZero, NatRec, Add, Multiply, ConstInt, ConstBool, If, LogicalAnd, LogicalNot, LogicalOr, List, Cons, ListHead, ListTail, ListIsEmpty, Abstraction, Application, Inl, Inr, DotTuple, Tuple, DotRecord, SRecord, Subtract, Divide, Pattern, PatternBinding, PatternVariant } from './ast'
 import { Context, ContextSymbol } from './context'
 import { Errors, TCSimpleError, TCNotSupportedError } from './errors'
 import { TypecheckExprExtra } from './types'
@@ -63,20 +63,19 @@ function typecheckFunctionDecl(decl: DeclFun, ctx: Context) {
     })
   }
 
-  const returnType = typecheckExpr(decl.returnValue, ctx)
+  const returnType = typecheckExpr(decl.returnValue, ctx, {expectedType: decl.returnType ?? null})
   if (decl.returnType === undefined || returnType === undefined) {
     // todo
-    throw new Error
+    throw new Error()
   }
-  if (decl.returnType !== undefined || decl.returnType !== undefined) {
-    verifyTypesMatch(decl.returnType, returnType, ctx)
-  }
+  verifyTypesMatch(decl.returnType, returnType, ctx)
 
   ctx.popDeclarationLayer()
 }
 
 function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Type {
   const type = expr.type
+  const expectedType = extra?.expectedType ?? null
   switch (type) {
     case 'Succ':
     case 'NatPred':
@@ -85,6 +84,8 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
     case 'Add':
     case 'Multiply':
     case 'ConstInt':
+    case 'Subtract':
+    case 'Divide':
       return typecheckNatRelatedExpr(expr, ctx, extra)
     case 'ConstBool':
     case 'LogicalAnd':
@@ -114,6 +115,29 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
       const innerType = typecheckExpr(expr.expr, ctx, { expectedType: expr.ascribedType })
       verifyTypesMatch(innerType, expr.ascribedType, ctx)
       return expr.ascribedType
+    case 'Match':
+      const { cases, expr: expression } = expr
+      const exprType = typecheckExpr(expression, ctx, extra)
+      thrower([
+        [!cases.length, new TCSimpleError(Errors.ILLEGAL_EMPTY_MATCHING)],
+        [!isExhaustiveMatching(exprType, cases.map(c => c.pattern)), new TCSimpleError(Errors.NONEXHAUSTIVE_MATCH_PATTERNS)]
+      ])
+
+      let caseBodyInferredType = expectedType
+
+      ctx.pushDeclarationLayer([])
+      for (const cs of cases) {
+        checkPattern(cs.pattern, exprType, ctx)
+        const inferredType = typecheckExpr(cs.expr, ctx, extra)
+        if (caseBodyInferredType) {
+          verifyTypesMatch(caseBodyInferredType, inferredType, ctx)
+        } else {
+          caseBodyInferredType = inferredType
+        }
+      }
+      ctx.popDeclarationLayer()
+    
+      return caseBodyInferredType!
     case 'Var':
       const declarationOfVar = ctx.findDeclaration(expr.name)
       return declarationOfVar.declType
@@ -126,7 +150,6 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
       }
       return expr1Type
     case 'Unit':
-      // todo
       thrower([[!ctx.isExtended(ExtensionKeys.unit), new TCNotSupportedError(expr, ExtensionKeys.unit)]])
       return TYPE_UNIT
     case 'Let':
@@ -135,7 +158,7 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
       for (const pb of pbs) {
         if (pb.pattern.type === 'PatternVar') {
           const name = pb.pattern.name
-          const type = typecheckExpr(pb.rhs, ctx)
+          const type = typecheckExpr(pb.rhs, ctx, extra)
           ctx.addDeclarationToLayer({
             name,
             declType: type,
@@ -144,9 +167,26 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
           })
         }
       }
-      const letType = typecheckExpr(expr.body, ctx)
+      const letType = typecheckExpr(expr.body, ctx, extra)
       ctx.popDeclarationLayer()
       return letType
+    case 'Variant':
+      if (!expectedType) {
+        throw new TCSimpleError(Errors.AMBIGUOUS_VARIANT_TYPE)
+      }
+      if (expectedType.type !== 'TypeVariant') {
+        throw new TCSimpleError(Errors.UNEXPECTED_VARIANT)
+      }
+      const { label, expr: value } = expr
+      const field = expectedType.fieldTypes.find(
+        (field) => field.label === label
+      )
+      if (field === undefined) {
+        throw new Error(Errors.UNEXPECTED_VARIANT_LABEL)
+      }
+      const fieldType = typecheckExpr(value, ctx, {expectedType: field.fieldType!})
+      verifyTypesMatch(field.fieldType!, fieldType, ctx)
+      return expectedType
     default:
       console.log(expr)
       throw new Error(`unexpected: ${type}`)
@@ -154,8 +194,95 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
   }
 }
 
+function checkPattern(pattern: Pattern, type: Type, ctx: Context, origin?: Pattern | PatternBinding) {
+  switch (pattern.type) {
+    case 'PatternVar': 
+      ctx.addDeclarationToLayer({
+        name: pattern.name,
+        declType: type,
+        origin: origin ?? pattern,
+        [ContextSymbol]: 'ContextDecl'
+      })
+      return
+    case 'PatternInl':
+    case 'PatternInr':
+      if (type.type !== 'TypeSum') {
+        throw new Error(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
+      }
+      ctx.pushDeclarationLayer([])
+      checkPattern(pattern.pattern, pattern.type === 'PatternInl' ? type.left : type.right, ctx, origin)
+      ctx.popDeclarationLayer()
+      return
+    case 'PatternVariant':
+      if (type.type !== 'TypeVariant') {
+        throw new Error(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
+      }
+      const { label, pattern: innerPattern } = pattern
+      const { fieldTypes } = type
+      const field = fieldTypes.find((field) => field.label === label)
+      if (!field) {
+        throw new Error(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
+      }
+      return checkPattern(innerPattern!, field.fieldType!, ctx, origin)
+    default:
+      throw new Error('Unimplemented')
+  }
+}
+
+function isExhaustiveMatching(type: Type, patterns: Pattern[]): boolean {
+  const types = patterns.map((pattern) => pattern.type)
+  if (types.some((type) => type === 'PatternVar')) return true
+  switch (type.type) {
+    case 'TypeSum':
+      return types.includes('PatternInl') && types.includes('PatternInr')
+    case 'TypeVariant':
+      const { fieldTypes } = type
+      const usedPatternLabels = (patterns as PatternVariant[]).map(
+        (pattern) => pattern.label
+      )
+      for (const { label } of fieldTypes) {
+        if (!usedPatternLabels.includes(label)) {
+          return false
+        }
+      }
+      return true
+    default:
+      return false
+  }
+}
+
 function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
   switch (true) {
+    /** VARIANTS */
+    case expected.type === 'TypeVariant' && actual.type !== 'TypeVariant':
+      // todo
+      throw new Error()
+    case expected.type !== 'TypeVariant' && actual.type === 'TypeVariant':
+      // todo
+      throw new Error()
+    case expected.type === 'TypeVariant' && actual.type === 'TypeVariant':
+      const actualFields = actual.fieldTypes
+      for (const { label, fieldType } of expected.fieldTypes) {
+        const actualField = actualFields.find((f) => f.label === label)
+        if (!actualField) {
+          // Expected a field but did not find it
+          throw new Error(Errors.UNEXPECTED_TYPE_FOR_EXPRESSION)
+        }
+        verifyTypesMatch(fieldType!, actualField.fieldType!, ctx)
+      }
+      if (
+        actualFields.some(
+          (field) =>
+            !expected.fieldTypes.some(
+              (exField) => exField.label === field.label
+            )
+        )
+      ) {
+        // There is an actual field that was not expected
+        throw new Error(Errors.UNEXPECTED_VARIANT_LABEL)
+      }
+      return
+
     /** SUMS */
     case expected.type === 'TypeSum' && actual.type !== 'TypeSum':
       // todo
@@ -289,8 +416,7 @@ function verifyTypesMatch(expected: Type, actual: Type, ctx: Context) {
   throw new Error('Unexpected')
 }
 
-
-type NatRelatedExpr = Succ | NatPred | NatIsZero | NatRec | Add | Multiply | ConstInt
+type NatRelatedExpr = Succ | NatPred | NatIsZero | NatRec | Add | Multiply | Subtract | Divide | ConstInt
 function typecheckNatRelatedExpr<T extends NatRelatedExpr, _E = Exclude<NatRelatedExpr, T>>(expr: T, ctx: Context, extra?: TypecheckExprExtra): Type {
   switch (expr.type) {
     case 'NatPred':
@@ -300,6 +426,13 @@ function typecheckNatRelatedExpr<T extends NatRelatedExpr, _E = Exclude<NatRelat
       return TYPE_NAT
     case 'Add':
     case 'Multiply':
+    case 'Subtract':
+    case 'Divide':
+      const {left, right} = expr
+      const leftType = typecheckExpr(left, ctx, extra)
+      const rightType = typecheckExpr(right, ctx, extra)
+      verifyTypesMatch(TYPE_NAT, leftType, ctx)
+      verifyTypesMatch(TYPE_NAT, rightType, ctx)
       return TYPE_NAT
     case 'ConstInt':
       if (expr.value < 0) {
@@ -591,9 +724,9 @@ function typecheckTupleRelatedExpr<T extends TupleRelatedExpr, _E = Exclude<Tupl
           tupleType.types.length !== 2 && !ctx.isExtended(ExtensionKeys.tuples),
           new TCNotSupportedError(expr, ExtensionKeys.tuples),
         ],
-        [tupleType.types.length <= expr.index, new TCSimpleError(Errors.TUPLE_INDEX_OUT_OF_BOUNDS)],
+        [tupleType.types.length < expr.index, new TCSimpleError(Errors.TUPLE_INDEX_OUT_OF_BOUNDS)],
       ])
-      return tupleType.types[expr.index]
+      return tupleType.types[expr.index - 1]
     default:
       protector(expr, 'typecheckTupleRelatedExpr')
       throw new Error()
