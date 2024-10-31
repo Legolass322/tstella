@@ -697,16 +697,14 @@ type TupleRelatedExpr = Tuple | DotTuple
 function typecheckTupleRelatedExpr<T extends TupleRelatedExpr, _E = Exclude<TupleRelatedExpr, T>>(expr: T, ctx: Context, extra?: TypecheckExprExtra): Type {
   switch (expr.type) {
     case 'Tuple':
-      thrower([
-        [
-          expr.exprs.length === 2 && !ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs),
-          new TCNotSupportedError(expr, ExtensionKeys.tuples, ExtensionKeys.pairs),
-        ],
-        [!ctx.isExtended(ExtensionKeys.tuples), new TCNotSupportedError(expr, ExtensionKeys.tuples)],
-      ])
+      const firstCondition = expr.exprs.length === 2 && !ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs)
+      const secondCondition = expr.exprs.length !== 2 && !ctx.isExtendedSome(ExtensionKeys.tuples)
+      if (firstCondition || secondCondition) {
+        throw new TCNotSupportedError(expr, ExtensionKeys.tuples, ExtensionKeys.pairs)
+      }
       const tupleExprTypes = expr.exprs.map(e => typecheckExpr(e, ctx))
       return makeTuple(tupleExprTypes)
-    case 'DotTuple':
+    case 'DotTuple': {
       thrower([[
         !ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs),
         new TCNotSupportedError(expr, ExtensionKeys.tuples, ExtensionKeys.pairs),
@@ -716,13 +714,15 @@ function typecheckTupleRelatedExpr<T extends TupleRelatedExpr, _E = Exclude<Tupl
         throw new TCSimpleError(Errors.UNEXPECTED_TUPLE)
       }
       thrower([
-        [
-          tupleType.types.length !== 2 && !ctx.isExtended(ExtensionKeys.tuples),
-          new TCNotSupportedError(expr, ExtensionKeys.tuples),
-        ],
         [tupleType.types.length < expr.index, new TCSimpleError(Errors.TUPLE_INDEX_OUT_OF_BOUNDS)],
       ])
+      const firstCondition = tupleType.types.length === 2 && !ctx.isExtendedSome(ExtensionKeys.tuples, ExtensionKeys.pairs)
+      const secondCondition = tupleType.types.length !== 2 && !ctx.isExtendedSome(ExtensionKeys.tuples)
+      if (firstCondition || secondCondition) {
+        throw new TCNotSupportedError(expr, ExtensionKeys.tuples, ExtensionKeys.pairs)
+      }
       return tupleType.types[expr.index - 1]
+    }
     default:
       protector(expr, 'typecheckTupleRelatedExpr')
       throw new Error()
