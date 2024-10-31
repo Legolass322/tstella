@@ -1,5 +1,5 @@
 language core;
-extend with #numeric-literals, #records, #multiparameter-functions;
+extend with #numeric-literals, #records, #multiparameter-functions, #curried-multiparameter-functions;
 extend with #tuples, #nullary-functions;
 extend with #let-bindings, #unit-type;
 

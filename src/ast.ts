@@ -122,6 +122,13 @@ export const TYPE_UNIT = makeSimpleType('TypeUnit')
 export const TYPE_TOP = makeSimpleType('TypeTop')
 export const TYPE_BOTTOM = makeSimpleType('TypeBottom')
 
+export function makeRefType(type: Type): TypeRef {
+  return {
+    type: 'TypeRef',
+    referredType: type,
+  }
+}
+
 export interface TypeFun {
   type: 'TypeFun';
   // TODO: handle multi-param and nullary extensions being enabled, and make [Type] (tuple type with 1 element) the default

@@ -26,11 +26,13 @@ export class Context {
   public declarationStack: Record<Identifier, ContextDecl>[]
   public extensions: Extensions
   public hasMain: boolean
+  public exceptionType: Type | null
 
   constructor() {
     this.declarationStack = []
     this.extensions = {}
     this.hasMain = false
+    this.exceptionType = null
   }
 
   get lastDeclarationLayer() {

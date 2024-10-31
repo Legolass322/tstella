@@ -1,4 +1,4 @@
-import { type Decl, type DeclFun, type Expr, type Program, type Type, makeFunType, ExtensionKeys, RecordFieldType, simpleTypes, TYPE_NAT, TYPE_BOOL, TYPE_UNIT, makeTuple, TypeSum, TYPE_BOTTOM, TYPE_TOP, Succ, NatPred, NatIsZero, NatRec, Add, Multiply, ConstInt, ConstBool, If, LogicalAnd, LogicalNot, LogicalOr, List, Cons, ListHead, ListTail, ListIsEmpty, Abstraction, Application, Inl, Inr, DotTuple, Tuple, DotRecord, SRecord, Subtract, Divide, Pattern, PatternBinding, PatternVariant } from './ast'
+import { type Decl, type DeclFun, type Expr, type Program, type Type, makeFunType, ExtensionKeys, RecordFieldType, simpleTypes, TYPE_NAT, TYPE_BOOL, TYPE_UNIT, makeTuple, TypeSum, TYPE_TOP, Succ, NatPred, NatIsZero, NatRec, Add, Multiply, ConstInt, ConstBool, If, LogicalAnd, LogicalNot, LogicalOr, List, Cons, ListHead, ListTail, ListIsEmpty, Abstraction, Application, Inl, Inr, DotTuple, Tuple, DotRecord, SRecord, Subtract, Divide, Pattern, PatternBinding, PatternVariant, ConstMemory, Reference, Dereference, Assignment, makeRefType, Throw, Panic, TryWith, TryCatch } from './ast'
 import { Context, ContextSymbol } from './context'
 import { Errors, TCSimpleError, TCNotSupportedError } from './errors'
 import { TypecheckExprExtra } from './types'
@@ -27,8 +27,10 @@ function typecheckDecl(decl: Decl, ctx: Context) {
     case 'DeclFun':
       typecheckFunctionDecl(decl, ctx)
       break
-    case 'DeclFunGeneric':
     case 'DeclExceptionType':
+      ctx.exceptionType = decl.exceptionType
+      break
+    case 'DeclFunGeneric':
     case 'DeclExceptionVariant':
     case 'DeclTypeAlias':
       console.error('unimplemeted typecheckProgram')
@@ -110,6 +112,16 @@ function typecheckExpr(expr: Expr, ctx: Context, extra?: TypecheckExprExtra): Ty
     case 'ListTail':
     case 'ListIsEmpty':
       return typecheckListRelatedExpr(expr, ctx, extra)
+    case 'Assignment':
+    case 'ConstMemory':
+    case 'Reference':
+    case 'Dereference':
+      return typecheckMemoryRelatedExpr(expr, ctx, extra)
+    case 'Throw':
+    case 'Panic':
+    case 'TryCatch':
+    case 'TryWith':
+      return typecheckErrorRelatedExpr(expr, ctx, extra)
     case 'TypeAscription':
       const innerType = typecheckExpr(expr.expr, ctx, { expectedType: expr.ascribedType })
       verifyTypesMatch(innerType, expr.ascribedType, ctx)
@@ -207,7 +219,7 @@ function checkPattern(pattern: Pattern, type: Type, ctx: Context, origin?: Patte
     case 'PatternInl':
     case 'PatternInr':
       if (type.type !== 'TypeSum') {
-        throw new Error(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
+        throw new TCSimpleError(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
       }
       ctx.pushDeclarationLayer([])
       checkPattern(pattern.pattern, pattern.type === 'PatternInl' ? type.left : type.right, ctx, origin)
@@ -215,13 +227,13 @@ function checkPattern(pattern: Pattern, type: Type, ctx: Context, origin?: Patte
       return
     case 'PatternVariant':
       if (type.type !== 'TypeVariant') {
-        throw new Error(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
+        throw new TCSimpleError(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
       }
       const { label, pattern: innerPattern } = pattern
       const { fieldTypes } = type
       const field = fieldTypes.find((field) => field.label === label)
       if (!field) {
-        throw new Error(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
+        throw new TCSimpleError(Errors.UNEXPECTED_PATTERN_FOR_TYPE)
       }
       return checkPattern(innerPattern!, field.fieldType!, ctx, origin)
     default:
@@ -520,7 +532,7 @@ function typecheckListRelatedExpr<T extends ListRelatedExpr, _E = Exclude<ListRe
       if (!expr.exprs.length) {
         return {
           type: 'TypeList',
-          types: [TYPE_TOP]
+          types: [expectedItemType]
         }
       }
 
@@ -747,3 +759,101 @@ function typecheckRecordRelatedExpr<T extends RecordRelatedExpr, _E = Exclude<Re
       throw new Error()
   }
 }
+
+type MemoryRelatedExpr = ConstMemory | Dereference | Reference | Assignment
+function typecheckMemoryRelatedExpr<T extends MemoryRelatedExpr, _E = Exclude<MemoryRelatedExpr, T>>(expr: T, ctx: Context, extra?: TypecheckExprExtra): Type {
+  const expectedType = extra?.expectedType ?? null
+  switch (expr.type) {
+    case 'ConstMemory': 
+      if (!expectedType) {
+        throw new TCSimpleError(Errors.AMBIGUOUS_REFERENCE_TYPE)
+      }
+      if (expectedType.type !== 'TypeRef') {
+        throw new TCSimpleError(Errors.UNEXPECTED_MEMORY_ADDRESS)
+      }
+      return expectedType
+    case 'Reference':
+      const { expr: initialValue } = expr
+      let eType = expectedType
+
+      if (expectedType && expectedType.type === 'TypeRef') {
+        eType = expectedType.referredType
+      }
+      const exprType = typecheckExpr(initialValue, ctx, {expectedType: eType})
+      return makeRefType(exprType)
+    case 'Dereference': 
+      const { expr: reference } = expr
+      const refType = typecheckExpr(
+        reference,
+        ctx,
+        {expectedType: expectedType && makeRefType(expectedType)}
+      )
+      if (refType.type !== 'TypeRef') {
+        throw new TCSimpleError(Errors.NOT_A_REFERENCE)
+      }
+      return refType.referredType
+    case 'Assignment': 
+      const { lhs, rhs } = expr
+      const lhsType = typecheckExpr(lhs, ctx)
+      if (lhsType.type !== 'TypeRef') {
+        throw new TCSimpleError(Errors.NOT_A_REFERENCE)
+      }
+      const rhsType = typecheckExpr(rhs, ctx, {expectedType: lhsType.referredType})
+      verifyTypesMatch(rhsType, lhsType.referredType, ctx)
+      return TYPE_UNIT
+    default:
+      protector(expr, 'typecheckMemoryRelatedExpr')
+      throw new Error()
+  }
+}
+
+type ErrorRelatedExpr = Panic | Throw | TryWith | TryCatch
+function typecheckErrorRelatedExpr<T extends ErrorRelatedExpr, _E = Exclude<ErrorRelatedExpr, T>>(expr: T, ctx: Context, extra?: TypecheckExprExtra): Type {
+  const expectedType = extra?.expectedType ?? null
+  switch (expr.type) {
+    case 'Panic': 
+      if (!expectedType) {
+        throw new TCSimpleError(Errors.AMBIGUOUS_PANIC_TYPE)
+      }
+      return expectedType
+    case 'Throw': 
+      if (!ctx.exceptionType) {
+        throw new TCSimpleError(Errors.EXCEPTION_TYPE_NOT_DECLARED)
+      }
+      if (!expectedType) {
+        throw new TCSimpleError(Errors.AMBIGUOUS_THROW_TYPE)
+      }
+      const { expr: thrownValue } = expr
+      const valueType = typecheckExpr(thrownValue, ctx, {expectedType: ctx.exceptionType})
+      verifyTypesMatch(ctx.exceptionType, valueType, ctx)
+      return expectedType
+    case 'TryWith': {
+      const { tryExpr, fallbackExpr } = expr
+      const tryType = typecheckExpr(tryExpr, ctx, {expectedType})
+      const fallbackType = typecheckExpr(fallbackExpr, ctx, {expectedType})
+      verifyTypesMatch(tryType, fallbackType, ctx)
+      return tryType
+    }
+    case 'TryCatch': {
+      const { tryExpr, pattern, fallbackExpr } = expr
+      const tryType = typecheckExpr(tryExpr, ctx, {expectedType})
+      if (ctx.exceptionType == null) {
+        throw new TCSimpleError(Errors.EXCEPTION_TYPE_NOT_DECLARED)
+      }
+      ctx.pushDeclarationLayer([])
+      checkPattern(pattern, ctx.exceptionType, ctx)
+      const fallbackType = typecheckExpr(
+        fallbackExpr,
+        ctx,
+        {expectedType},
+      )
+      verifyTypesMatch(tryType, fallbackType, ctx)
+      ctx.popDeclarationLayer()
+      return tryType
+    }
+    default:
+      protector(expr, 'typecheckErrorRelatedExpr')
+      throw new Error()
+  }
+}
+

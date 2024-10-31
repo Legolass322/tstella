@@ -74,10 +74,7 @@ fn attempt(get_one? : Bool) -> <| value : Nat, failure : Unit |> {
 // References
 fn another_one(n : Nat) -> Nat {
   return
-    let x = new(0) in
-    x := *x + 1;
-    x := *x * *x;
-    *x
+    let x = new(0) in *x + 1;
 }
 fn inc_ref(ref : &Nat) -> Unit {
   return
