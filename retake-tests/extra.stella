@@ -3,5 +3,5 @@ language core;
 extend with #sum-types, #type-ascriptions;
 
 fn main(n : Nat) -> Nat + Nat {
-  return ((if true then fn (a : Nat) { return inl(0) } else fn (a : Nat) { return inr(0) }) as (fn(Nat) -> Nat + Nat)) (0)
+  return ((if true then fn (a : Nat) { return inl(0) } else fn (a : Nat) { return inr(0) }) as (fn(Nat) -> (Nat + Nat))) (0)
 }
